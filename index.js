@@ -5,6 +5,7 @@ const app = express();
 const bodyParser = require('body-parser');
 const mongoose = require('mongoose');
 const dns = require('dns');
+const { log } = require('console');
 
 // Basic Configuration
 const port = process.env.PORT || 3000;
@@ -123,13 +124,96 @@ let short_url;
 let isValidUrl = false;
 let alreadyShortenedUrl = false;
 
+app
+.route('/')
+.get((req, res) => res.sendFile(process.cwd() + '/views/index.html'));
+
+app.get('/api/shorturl',
+(req, res) => {
+    isValidUrl ?
+      res.json({
+        website_url,
+        short_url
+      })
+      : res.json({ error: 'invalid url' });
+    });
+    
+    app.post(
+      '/api/shorturl',
+      async (req, res, next) => {
+        //check validity url
+        isValidUrl = checkUrl(req.body.url);
+        
+        if (isValidUrl) {
+          const inputUrl = new URL(req.body.url);
+
+      try {
+        await new Promise((resolve, reject) => {
+          dns.lookup(inputUrl.host, (err, address, family) => {
+            isValidUrl = true;
+            website_url = inputUrl.toString();
+            console.log('dns suc6', website_url);
+            resolve();
+          });
+        })
+      } catch (err) {
+        console.log('dns fail', err);
+        isValidUrl = false;
+        reject(err);
+      }
+    };
+    
+    next();
+  },
+  
+  async (req, res, next) => {
+  	//check database
+  	if (isValidUrl) {
+      let urlMatch = await OriginalAndShortUrl.findOne(
+        { originalUrl: website_url });
+      console.log("match: " + urlMatch);
+      
+      if (urlMatch) {
+         alreadyShortenedUrl = true;
+         short_url = urlMatch.shortUrl;
+         console.log('Already saved');
+       } else {
+        short_url = generateRandomString(4);
+       }
+      }
+       next();
+  },
+
+  async (req, res, next) => {
+    // store in database
+    if (isValidUrl && !alreadyShortenedUrl) {
+      
+      let newDatabaseInput = new OriginalAndShortUrl({
+        originalUrl: website_url,
+        shortUrl: short_url
+      });
+      console.log(newDatabaseInput);
+      newDatabaseInput.save();
+    }
+    next();
+  },
+  (req, res) => {
+    console.table([isValidUrl, website_url, short_url]);;
+    res.redirect('/api/shorturl');
+  }
+);
+
+app.listen(port, function() {
+  console.log(`Listening on port ${port}`);
+});
+
+
 app.get(
   '/api/shorturl/:short_url',
-  (req, res, next) => {
+  async (req, res, next) => {
     let shortUrlInput = req.params.short_url;
 
     // search from database
-    let urlOutput;
     OriginalAndShortUrl.findOne(
       { shortUrl: shortUrlInput },
       (err, urlMatch) => {
@@ -149,89 +233,3 @@ app.get(
     res.redirect(301, website_url);
   }
 );
-
-app
-  .route('/')
-  .get((req, res) => res.sendFile(process.cwd() + '/views/index.html'));
-
-app.get('/api/shorturl',
-  (req, res) => {
-    isValidUrl ?
-      res.json({
-        website_url,
-        short_url
-      })
-      : res.json({ error: 'invalid url' });
-  });
-
-app.post(
-  '/api/shorturl',
-  async (req, res, next) => {
-    //check validity url
-    isValidUrl = checkUrl(req.body.url);
-
-    if (isValidUrl) {
-      const inputUrl = new URL(req.body.url);
-
-      try {
-        await new Promise((resolve, reject) => {
-          dns.lookup(inputUrl.host, (err, address, family) => {
-            isValidUrl = true;
-            website_url = inputUrl.toString();
-            console.log('dns suc6', website_url);
-            resolve();
-          });
-        })
-      } catch (err) {
-        console.log('dns fail', err);
-        isValidUrl = false;
-        reject(err);
-      }
-    };
-
-    next();
-  },
-
-  (req, res, next) => {
-  	//check database
-  	if (isValidUrl) {
-  		OriginalAndShortUrl.findOne(
-  			{ originalUrl: website_url },
-  			(err, urlMatch) => {
-  				if (err) {
-  					console.error(err);
-  				} else if (urlMatch) {
-  					alreadyShortenedUrl = true;
-  					short_url = urlMatch.shortUrl;
-  					console.log('Already saved');
-  					next();
-  				}
-  			}
-  		);
-  	}
-  },
-  (req, res, next) => {
-    // store in database
-    if (isValidUrl && !alreadyShortenedUrl) {
-      short_url = generateRandomString(4);
-      let newDatabaseInput = new OriginalAndShortUrl({
-        originalUrl: website_url,
-        shortUrl: short_url
-      });
-      console.log(newDatabaseInput);
-      newDatabaseInput.save((err, data) => {
-        if (err) return console.error(err);
-      });
-    }
-    next();
-  },
-  (req, res) => {
-    console.table([isValidUrl, website_url, short_url]);;
-    res.redirect('/api/shorturl');
-  }
-);
-
-app.listen(port, function() {
-  console.log(`Listening on port ${port}`);
-});
-
